@@ -1,8 +1,7 @@
-#!/usr/bin/env python3
+main#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# (c) Shrimadhav U K
+# (c) Shrimadhav U K & @No_OnE_Kn0wS_Me
 
-# the logging things
 import logging
 logging.basicConfig(level=logging.DEBUG,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -10,8 +9,6 @@ logger = logging.getLogger(__name__)
 
 import os
 import time
-import random
-import shutil
 
 # the secret configuration specific things
 if bool(os.environ.get("WEBHOOK", False)):
@@ -24,34 +21,84 @@ from translation import Translation
 
 import pyrogram
 logging.getLogger("pyrogram").setLevel(logging.WARNING)
+from pyrogram import filters 
+from pyrogram import Client as Mai_bOTs
 
+#from helper_funcs.chat_base import TRChatBase
 from helper_funcs.display_progress import progress_for_pyrogram
-from helper_funcs.ran_text import random_char
 
+from pyrogram.errors import UserNotParticipant, UserBannedInChannel 
+from pyrogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 # https://stackoverflow.com/a/37631799/4723940
 from PIL import Image
+from database.database import *
+from database.db import *
 
-
-@pyrogram.Client.on_message(pyrogram.filters.command(["ren"]))
-async def rename_doc(bot, update):
-    if update.from_user.id  in Config.BANNED_USERS:
-        await bot.delete_messages(
-            chat_id=update.chat.id,
-            message_ids=update.message_id,
-            revoke=True
+@Mai_bOTs.on_message(pyrogram.filters.command(["scaption"]))
+async def set_caption(bot, update):
+    if len(update.command) == 1:
+        await update.reply_text(
+            "Custom Caption \n\n you can use this command to set your own caption  \n\n Usage : /scaption Your caption text \n\n note : For current file name use : <code>{filename}</code>", 
+            quote = True, 
+            reply_markup=InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton('Show Current Caption', callback_data = "shw_caption")      
+                ],
+                [
+                    InlineKeyboardButton('Delete Caption', callback_data = "d_caption")
+                ]
+            ]
+        ) 
         )
-        return
+    else:
+        command, CSTM_FIL_CPTN = update.text.split(' ', 1)
+        await update_cap(update.from_user.id, CSTM_FIL_CPTN)
+        await update.reply_text(f"**--Your Caption--:**\n\n{CSTM_FIL_CPTN}", quote=True)
+
+
+@Mai_bOTs.on_message(pyrogram.filters.command(["rename"]))
+async def rename_doc(bot, update):
+    update_channel = Config.UPDATE_CHANNEL
+    if update_channel:
+        try:
+            user = await bot.get_chat_member(update_channel, update.chat.id)
+            if user.status == "kicked":
+               await update.reply_text(" Sorry,You've Been Banned From Using Meh!")
+               return
+        except UserNotParticipant:
+            await update.reply_text(
+                text="**Due To The Huge Traffic Only Channel Members Can Use This Bot Means You Need To Join The Below Mentioned Channel Before Using Me! **",
+                reply_markup=InlineKeyboardMarkup([
+                    [ InlineKeyboardButton(text="Join My Updates Channel", url=f"https://t.me/{update_channel}")]
+              ])
+            )
+            return
+    #TRChatBase(update.from_user.id, update.text, "rename")
     if (" " in update.text) and (update.reply_to_message is not None):
         cmd, file_name = update.text.split(" ", 1)
+        if len(file_name) > 128:
+            await update.reply_text(
+                Translation.IFLONG_FILE_NAME.format(
+                    alimit="128",
+                    num=len(file_name)
+                )
+            )
+            return
         description = Translation.CUSTOM_CAPTION_UL_FILE
-        rfhf = random_char(5)
-        download_location = Config.DOWNLOAD_LOCATION + "/" + f'{rfhf}' + "/"
+        download_location = Config.DOWNLOAD_LOCATION + "/"
+        caption_text = await get_caption(update.from_user.id)
+        try:
+           caption_text2 = caption_text.caption.format(filename = file_name)
+        except:
+           caption_text2 =f"<code>{file_name}</code>"
+           pass 
         a = await bot.send_message(
-            chat_id=update.chat.id,
-            text=Translation.DOWNLOAD_FILE,
-            reply_to_message_id=update.message_id
+        chat_id=update.chat.id,
+        text=Translation.DOWNLOAD_START,
+        reply_to_message_id=update.message_id
         )
         c_time = time.time()
         the_real_download_location = await bot.download_media(
@@ -59,39 +106,36 @@ async def rename_doc(bot, update):
             file_name=download_location,
             progress=progress_for_pyrogram,
             progress_args=(
-                Translation.DOWNLOAD_FILE,
+                Translation.DOWNLOAD_START,
                 a,
                 c_time
             )
         )
-        await a.delete()
-        if the_real_download_location is None:
-            await bot.send_message(
-                text=Translation.FILE_NOT_FOUND,
-                chat_id=update.chat.id,
-                reply_to_message_id=update.message_id
-            )
-        else:
-            if "IndianMovie" in the_real_download_location:
+        if the_real_download_location is not None:
+            try:
                 await bot.edit_message_text(
-                    text=Translation.RENAME_403_ERR,
+                    text=Translation.SAVED_RECVD_DOC_FILE,
                     chat_id=update.chat.id,
                     message_id=a.message_id
                 )
-                return
+            except:
+                pass
             new_file_name = download_location + file_name
             os.rename(the_real_download_location, new_file_name)
-            up = await bot.send_message(
+            await bot.edit_message_text(
                 text=Translation.UPLOAD_START,
                 chat_id=update.chat.id,
-                reply_to_message_id=update.message_id,
-            )
+                message_id=a.message_id
+                )
             logger.info(the_real_download_location)
-            thumb_image_path = Config.DOWNLOAD_LOCATION + "/" + str(update.from_user.id) + "_" + "Anydl_adarsh_bot" + ".jpg"
+            thumb_image_path = Config.DOWNLOAD_LOCATION + "/" + str(update.from_user.id) + ".jpg"
             if not os.path.exists(thumb_image_path):
-                try:
-                    thumb_image_path = await take_screen_shot(new_file_name, os.path.dirname(new_file_name), random.randint(0, duration - 1))
-                except:
+                mes = await thumb(update.from_user.id)
+                if mes != None:
+                    m = await bot.get_messages(update.chat.id, mes.msg_id)
+                    await m.download(file_name=thumb_image_path)
+                    thumb_image_path = thumb_image_path
+                else:
                     thumb_image_path = None
             else:
                 width = 0
@@ -116,31 +160,34 @@ async def rename_doc(bot, update):
                 chat_id=update.chat.id,
                 document=new_file_name,
                 thumb=thumb_image_path,
-                caption=description,
-                # reply_markup=reply_markup,
+                caption=f"{caption_text2}",
+                parse_mode = "html",
+                reply_markup=InlineKeyboardMarkup([
+                    [ InlineKeyboardButton(text="𝚂ᴜᴘᴘᴏʀᴛ 𝙲ʜᴀɴɴᴇʟ", url=f"https://t.me/Mai_bOTs")]
+              ]), 
                 reply_to_message_id=update.reply_to_message.message_id,
                 progress=progress_for_pyrogram,
                 progress_args=(
                     Translation.UPLOAD_START,
-                    up, 
+                    a, 
                     c_time
                 )
             )
             try:
                 os.remove(new_file_name)
                 os.remove(thumb_image_path)
-                shutil.rmtree(download_location)
             except:
                 pass
             await bot.edit_message_text(
                 text=Translation.AFTER_SUCCESSFUL_UPLOAD_MSG,
                 chat_id=update.chat.id,
-                message_id=up.message_id,
+                message_id=a.message_id,
                 disable_web_page_preview=True
-            )
+           )
     else:
         await bot.send_message(
             chat_id=update.chat.id,
             text=Translation.REPLY_TO_DOC_FOR_RENAME_FILE,
             reply_to_message_id=update.message_id
-        )
+       )
+    
